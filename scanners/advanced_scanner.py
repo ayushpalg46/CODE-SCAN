@@ -187,6 +187,38 @@ def check_unauthenticated_endpoints_url(url, findings):
         except Exception:
             pass
 
+def check_outdated_software_url(url, findings):
+    try:
+        res = requests.get(url, timeout=3)
+        headers = {k.lower(): v for k, v in res.headers.items()}
+        
+        server = headers.get('server', '').lower()
+        x_powered = headers.get('x-powered-by', '').lower()
+        
+        old_signatures = [
+            (r'apache/1\.', "Apache 1.x (End of Life)", "high"),
+            (r'apache/2\.[0-2]\.', "Apache 2.0-2.2 (End of Life / Vulnerable)", "high"),
+            (r'php/5\.', "PHP 5.x (End of Life)", "high"),
+            (r'php/4\.', "PHP 4.x (End of Life)", "critical"),
+            (r'microsoft-iis/[1-7]\.', "IIS 1.0-7.x (Outdated & Vulnerable)", "high"),
+            (r'nginx/1\.[0-9]\.', "Nginx <1.10 (Outdated)", "medium")
+        ]
+        
+        for pattern, name, severity in old_signatures:
+            if re.search(pattern, server) or re.search(pattern, x_powered):
+                findings.append({
+                    "id": "OUTDATED_SERVER_SOFTWARE",
+                    "severity": severity,
+                    "title": f"Outdated Server Software: {name}",
+                    "description": f"The server header/powered-by header exposes outdated software: Server: {res.headers.get('Server', '')}, X-Powered-By: {res.headers.get('X-Powered-By', '')}.",
+                    "impact": "Exposing outdated software versions allows attackers to look up known CVE exploits for the specific target version.",
+                    "remediation": "Disable server version disclosure headers (e.g., ServerTokens Prod in Apache, expose_php = Off in php.ini) and update the server software to the latest stable version.",
+                    "reference": "https://cwe.mitre.org/data/definitions/933.html"
+                })
+                break
+    except Exception:
+        pass
+
 def scan_github_content(rel_path, content, findings):
     patterns = [
         (r'cp\s+-r\s+\.git\s+', "GIT_EXPOSING_METADATA_SCRIPT", "high", "Script copying .git folder to build output",
@@ -231,7 +263,23 @@ def scan_github_content(rel_path, content, findings):
 
         (r'router\.(get|post|put|delete)\s*\(\s*[\'"]\/(?:api\/)?(?:admin|settings|config|users)(?:\/[a-zA-Z0-9_:-]+)*[\'"]\s*,\s*function\s*\(', "GITHUB_MISSING_AUTH_MIDDLEWARE_FUNC", "high", "Potentially Unauthenticated Administrative Route (Function syntax)",
          "An administrative or sensitive route is declared without apparent intermediate authentication/authorization middleware.",
-         "Add authentication and role-based access control middleware (e.g. requireAuth, isAdmin) to the route definition.", "https://cwe.mitre.org/data/definitions/306.html")
+         "Add authentication and role-based access control middleware (e.g. requireAuth, isAdmin) to the route definition.", "https://cwe.mitre.org/data/definitions/306.html"),
+
+        (r'(?:let|const)\s+(\w+)\s*=\s*await\s+\w+\.(?:findOne|findById)[\s\S]*?\1\.\w+\s*=\s*.*?\1\.\w+[\s\S]*?await\s+\1\.save', "GITHUB_POTENTIAL_RACE_CONDITION", "high", "Potential Race Condition in Database Update",
+         "The codebase contains a read-modify-write pattern on a database model without transactions or atomic operations.",
+         "Use atomic database operations (e.g., $inc in MongoDB, UPDATE balance = balance + X in SQL) or database transactions/locks to prevent race conditions.", "https://cwe.mitre.org/data/definitions/362.html"),
+
+        (r'FROM\s+(?:ubuntu:14\.04|ubuntu:12\.04|node:8|node:10|node:6|python:2\.7|python:3\.5|debian:8|centos:6)', "GITHUB_OUTDATED_DOCKER_BASE", "high", "Outdated Docker Base Image Used",
+         "The Dockerfile uses a severely outdated and end-of-life base image, which likely contains numerous unpatched OS-level vulnerabilities.",
+         "Update the FROM instruction in your Dockerfile to use a modern, supported LTS base image (e.g., node:18-alpine, python:3.10-slim, ubuntu:22.04).", "https://cwe.mitre.org/data/definitions/1104.html"),
+
+        (r'"lodash"\s*:\s*["\'](?:\^|~)?(?:[0-3]\.|4\.(?:[0-9]|1[0-6])\.)', "GITHUB_VULNERABLE_LODASH", "high", "Vulnerable Dependency: lodash < 4.17.21",
+         "The package.json specifies a version of lodash that is vulnerable to Prototype Pollution (CVE-2020-8203, CVE-2020-28500).",
+         "Upgrade lodash dependency to version 4.17.21 or higher.", "https://cwe.mitre.org/data/definitions/1104.html"),
+
+        (r'"axios"\s*:\s*["\'](?:\^|~)?0\.(?:[0-9]|1[0-9]|20|21\.0)\.', "GITHUB_VULNERABLE_AXIOS", "medium", "Vulnerable Dependency: axios < 0.21.1",
+         "The package.json specifies a version of axios vulnerable to Server-Side Request Forgery (SSRF) or Denial of Service.",
+         "Upgrade axios dependency to version 0.21.1 or higher.", "https://cwe.mitre.org/data/definitions/1104.html")
     ]
     for pattern, fid, severity, title, impact, remediation, ref in patterns:
         match = re.search(pattern, content, re.IGNORECASE)
@@ -314,6 +362,9 @@ def scan(target_type, target):
         
         # Check Unauthenticated endpoints
         check_unauthenticated_endpoints_url(target, findings)
+        
+        # Check Outdated software
+        check_outdated_software_url(target, findings)
         
     elif target_type == 'github':
         print(json.dumps({"progress": 50}))
