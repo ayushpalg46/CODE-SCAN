@@ -234,6 +234,100 @@ def check_ssrf_idor_url(url, findings, parser):
                         })
                         break
 
+def check_outdated_crypto_deserialization_url(url, findings, headers, html_content, parser, cookies):
+    server = headers.get('Server', '')
+    x_powered = headers.get('X-Powered-By', '')
+    version_pattern = r'([a-zA-Z\-_]+)/(\d+\.\d+(\.\d+)?)'
+    detected = []
+    for h_val in [server, x_powered]:
+        if h_val:
+            matches = re.findall(version_pattern, h_val)
+            for name, version, _ in matches:
+                detected.append(f"{name} v{version}")
+                
+    if detected:
+        findings.append({
+            "id": "OUTDATED_SERVER_COMPONENTS",
+            "severity": "medium",
+            "title": "Outdated Server Component Version Exposed",
+            "description": f"The target returned version-specific server headers: {', '.join(detected)}.",
+            "impact": "Exposing specific version tags makes it easier for attackers to identify known public vulnerabilities (CVEs) targeting that environment.",
+            "remediation": "Configure the web server to hide specific product and version identifiers (e.g. ServerTokens ProductOnly, expose_php = Off).",
+            "reference": "https://cwe.mitre.org/data/definitions/200.html"
+        })
+
+    weak_crypto_terms = ["cryptojs.md5", "md5(", "sha1.js", "sha1(", "hex_md5"]
+    found_terms = []
+    for term in weak_crypto_terms:
+        if term in html_content.lower():
+            found_terms.append(term)
+    for script in parser.scripts:
+        if any(term in script.lower() for term in ["md5", "sha1", "crypto-js"]):
+            found_terms.append(script)
+            
+    if found_terms:
+        findings.append({
+            "id": "WEAK_CLIENT_CRYPTOGRAPHY",
+            "severity": "medium",
+            "title": "Weak Cryptographic Algorithms Reference in Client Scripts",
+            "description": f"Detected reference to legacy cryptographic algorithms (MD5/SHA1) in client scripts. Found: {', '.join(found_terms)}.",
+            "impact": "Using obsolete algorithms like MD5 or SHA-1 for sensitive hashing/signatures makes them vulnerable to collision attacks and password cracking.",
+            "remediation": "Migrate to stronger cryptographic standards (SHA-256, SHA-3, or bcrypt/argon2 for passwords).",
+            "reference": "https://cwe.mitre.org/data/definitions/328.html"
+        })
+
+    for cookie_name, cookie_val in cookies.items():
+        if "ro0ab" in cookie_val.lower():
+            findings.append({
+                "id": "INSECURE_DESERIALIZATION_COOKIE_JAVA",
+                "severity": "high",
+                "title": f"Java Serialized Object in Cookie ({cookie_name})",
+                "description": "Cookie value contains the Java serialized object magic signature 'rO0AB'.",
+                "impact": "Allows Remote Code Execution (RCE) if the application deserializes the user-supplied cookie value without object validation.",
+                "remediation": "Avoid using native serialization format. Use standard data exchange formats like JSON or XML with input validation.",
+                "reference": "https://owasp.org/www-project-top-ten/2021/A08_2021-Software_and_Data_Integrity_Failures"
+            })
+            break
+        elif re.search(r'(o:\d+:|a:\d+:\{)', cookie_val, re.IGNORECASE):
+            findings.append({
+                "id": "INSECURE_DESERIALIZATION_COOKIE_PHP",
+                "severity": "medium",
+                "title": f"PHP Serialized Object in Cookie ({cookie_name})",
+                "description": "Cookie value contains a plaintext PHP serialized object string.",
+                "impact": "Can lead to Object Injection vulnerabilities, privilege escalation, or code execution.",
+                "remediation": "Use JSON encoding (json_encode) instead of native php serialization (serialize/unserialize).",
+                "reference": "https://cwe.mitre.org/data/definitions/502.html"
+            })
+            break
+
+def check_rate_limiting_url(url, findings):
+    import concurrent.futures
+    def send_req(u):
+        try:
+            res = requests.get(u, timeout=2)
+            return res.status_code
+        except Exception:
+            return None
+            
+    status_codes = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(send_req, url) for _ in range(15)]
+        for fut in concurrent.futures.as_completed(futures):
+            status_codes.append(fut.result())
+            
+    if 429 in status_codes:
+        pass
+    else:
+        findings.append({
+            "id": "RATE_LIMITING_MISSING",
+            "severity": "medium",
+            "title": "Missing Rate Limiting / Request Throttling",
+            "description": "Fired 15 rapid concurrent requests to the target, and all requests succeeded without receiving HTTP 429 (Too Many Requests).",
+            "impact": "Exposes the application to brute-force attacks, high-frequency credential stuffing, scraper bots, and denial-of-service (DoS) attempts.",
+            "remediation": "Configure request throttling at the gateway (e.g. Cloudflare, Nginx limit_req) or application layer (e.g. express-rate-limit).",
+            "reference": "https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Prevention_Cheat_Sheet.html"
+        })
+
 def scan_github_content(rel_path, content, findings):
     cors_patterns = [
         (r'Access-Control-Allow-Origin.*\*', "CORS_WILDCARD_HEADERS", "medium", "Wildcard Access-Control-Allow-Origin configured in code", 
@@ -373,6 +467,107 @@ def scan_github_content(rel_path, content, findings):
                 "reference": "https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html"
             })
 
+    if rel_path == "package.json":
+        lodash_match = re.search(r'"lodash"\s*:\s*["\']\^?([0-3]\.\d+\.\d+|4\.[0-9]\.\d+|4\.1[0-6]\.\d+)["\']', content)
+        if lodash_match:
+            findings.append({
+                "id": "OUTDATED_VULNERABLE_LODASH",
+                "severity": "medium",
+                "title": "Outdated Vulnerable Dependency (lodash < 4.17.21)",
+                "description": f"Found outdated lodash version '{lodash_match.group(1)}' in package.json.",
+                "impact": "Older versions of lodash are vulnerable to Prototype Pollution, leading to remote code execution or crashes.",
+                "remediation": "Update lodash to version 4.17.21 or higher.",
+                "reference": "https://nvd.nist.gov/vuln/detail/CVE-2020-8203"
+            })
+
+    if rel_path == "requirements.txt":
+        django_match = re.search(r'django==([0-2]\.\d+\.\d+|3\.[0-1]\.\d+|4\.0\.\d+)', content, re.IGNORECASE)
+        if django_match:
+            findings.append({
+                "id": "OUTDATED_VULNERABLE_DJANGO",
+                "severity": "high",
+                "title": "Outdated Vulnerable Framework (Django < 4.2)",
+                "description": f"Found outdated Django version '{django_match.group(1)}' in requirements.txt.",
+                "impact": "Exposes Django applications to multiple security vulnerabilities fixed in newer releases.",
+                "remediation": "Update Django to version 4.2 LTS or higher in your requirements.txt.",
+                "reference": "https://docs.djangoproject.com/en/5.0/releases/"
+            })
+
+    weak_crypto_patterns = [
+        (r'hashlib\.md5\(', "GIT_WEAK_HASH_MD5_PY", "medium", "Use of Weak Cryptographic Hash (MD5) in Python",
+         "MD5 is cryptographically broken and vulnerable to collision attacks.",
+         "Upgrade hash function to SHA-256 or SHA-3."),
+        (r'hashlib\.sha1\(', "GIT_WEAK_HASH_SHA1_PY", "medium", "Use of Weak Cryptographic Hash (SHA-1) in Python",
+         "SHA-1 has severe security weaknesses and collisions are practical.",
+         "Migrate to SHA-256 or bcrypt for password hashing."),
+        (r'crypto\.createHash\(\s*[\'"]md5[\'"]\)', "GIT_WEAK_HASH_MD5_JS", "medium", "Use of Weak Hash (MD5) in Javascript",
+         "MD5 is susceptible to collisions and is unsafe for password verification.",
+         "Utilize SHA-256 or pbkdf2 with high iteration counts."),
+        (r'crypto\.createHash\(\s*[\'"]sha1[\'"]\)', "GIT_WEAK_HASH_SHA1_JS", "medium", "Use of Weak Hash (SHA-1) in Javascript",
+         "SHA-1 is no longer considered secure for signature verification.",
+         "Upgrade hash algorithm to SHA-256.")
+    ]
+    for pattern, fid, severity, title, impact, remediation in weak_crypto_patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            findings.append({
+                "id": fid,
+                "severity": severity,
+                "title": f"{title} ({rel_path})",
+                "description": f"Detected weak hash algorithm: '{match.group(0)}' in {rel_path}.",
+                "impact": impact,
+                "remediation": remediation,
+                "reference": "https://cwe.mitre.org/data/definitions/328.html"
+            })
+
+    deserialization_patterns = [
+        (r'pickle\.loads\(', "GIT_INSECURE_DESERIALIZATION_PICKLE_PY", "high", "Insecure Deserialization via pickle.loads()",
+         "Python pickle allows arbitrary object construction, leading to Remote Code Execution.",
+         "Do not deserialize untrusted inputs with pickle. Use JSON or XML serialization instead."),
+        (r'yaml\.load\(\s*[^,)]+\s*\)', "GIT_INSECURE_YAML_LOAD_PY", "high", "Unsafe YAML Deserialization",
+         "Using yaml.load() without SafeLoader allows arbitrary python command execution.",
+         "Always load YAML files using yaml.safe_load() or specify Loader=yaml.SafeLoader."),
+        (r'unserialize\(', "GIT_INSECURE_DESERIALIZATION_PHP", "high", "Insecure Deserialization via PHP unserialize()",
+         "Deserializing user input using PHP unserialize() can trigger Object Injection and execution of arbitrary code.",
+         "Use json_decode() for passing structured user-supplied data safely.")
+    ]
+    for pattern, fid, severity, title, impact, remediation in deserialization_patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            findings.append({
+                "id": fid,
+                "severity": severity,
+                "title": f"{title} ({rel_path})",
+                "description": f"Detected insecure deserialization pattern: '{match.group(0)}' in {rel_path}.",
+                "impact": impact,
+                "remediation": remediation,
+                "reference": "https://cwe.mitre.org/data/definitions/502.html"
+            })
+
+    rate_limit_patterns = [
+        (r'express-rate-limit', "GIT_EXPRESS_RATE_LIMIT_DEP", "medium", "Express Rate Limit dependency configured",
+         "Protects API endpoints from automated brute forcing and volumetric abuse.",
+         "Configure rate limiter options (max requests, windowMs) on sensitive auth routes."),
+        (r'flask_limiter|FlaskLimiter', "GIT_FLASK_RATE_LIMIT", "medium", "Flask Limiter module referenced in code",
+         "Ensures route-level request throttling is enabled in Flask application.",
+         "Initialize Limiter(app) and apply @limiter.limit decorator to authentication routes."),
+        (r'DEFAULT_THROTTLE_CLASSES|DEFAULT_THROTTLE_RATES', "GIT_DJANGO_RATE_LIMIT", "medium", "Django Rest Framework Throttling Configured",
+         "Ensures Django REST APIs have throttling classes active to prevent API abuse.",
+         "Configure REST_FRAMEWORK settings with AnonRateThrottle and UserRateThrottle classes.")
+    ]
+    for pattern, fid, severity, title, impact, remediation in rate_limit_patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            findings.append({
+                "id": fid,
+                "severity": severity,
+                "title": f"{title} ({rel_path})",
+                "description": f"Detected rate limiting package configuration: '{match.group(0)}' in {rel_path}.",
+                "impact": impact,
+                "remediation": remediation,
+                "reference": "https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Prevention_Cheat_Sheet.html"
+            })
+
 def scan_github(target):
     findings = []
     temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_medium", f"repo_{int(time.time() * 1000)}")
@@ -443,6 +638,10 @@ def scan(target_type, target):
             check_sqli_csrf_url(target, findings, parser)
             # Check SSRF & IDOR
             check_ssrf_idor_url(target, findings, parser)
+            # Check Outdated, Crypto & Deserialization
+            check_outdated_crypto_deserialization_url(target, findings, res.headers, html_content, parser, res.cookies)
+            # Check Rate Limiting
+            check_rate_limiting_url(target, findings)
         except Exception:
             pass
         
