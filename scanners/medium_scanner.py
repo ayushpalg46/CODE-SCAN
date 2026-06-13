@@ -187,6 +187,53 @@ def check_sqli_csrf_url(url, findings, parser):
                     "reference": "https://owasp.org/www-community/attacks/csrf"
                 })
 
+def check_ssrf_idor_url(url, findings, parser):
+    parsed = urlparse(url)
+    ssrf_params = ["url", "fetch", "image", "uri", "path", "file", "src", "u", "link", "api", "target"]
+    idor_params = ["id", "uid", "user_id", "account", "invoice", "doc", "document", "order", "file_id", "project_id"]
+    
+    if parsed.query:
+        for param in parsed.query.split('&'):
+            if '=' in param:
+                k, v = param.split('=', 1)
+                if k.lower() in ssrf_params:
+                    loopback_payload = "http://127.0.0.1:44444"
+                    test_query = parsed.query.replace(f"{k}={v}", f"{k}={loopback_payload}")
+                    test_url = url.split('?')[0] + "?" + test_query
+                    try:
+                        res = requests.get(test_url, timeout=3)
+                        content = res.text.lower()
+                        ssrf_signatures = ["connection refused", "failed to connect", "127.0.0.1", "host unreachable", "connection timed out"]
+                        if any(sig in content for sig in ssrf_signatures):
+                            findings.append({
+                                "id": "POTENTIAL_SSRF_PARAMETER",
+                                "severity": "high",
+                                "title": "Potential Server-Side Request Forgery (SSRF)",
+                                "description": f"The query parameter '{k}' was injected with a loopback URL and leaked internal connection error indicators.",
+                                "impact": "Allows attackers to make the server scan internal ports, query private metadata services, or access internal microservices.",
+                                "remediation": "Enforce a strict whitelist of permitted host domains for outgoing HTTP requests. Do not accept arbitrary user-supplied URLs.",
+                                "reference": "https://owasp.org/www-project-top-ten/2021/A10_2021-Server-Side_Request_Forgery_%28SSRF%29"
+                            })
+                            break
+                    except Exception:
+                        pass
+        
+        for param in parsed.query.split('&'):
+            if '=' in param:
+                k, v = param.split('=', 1)
+                if k.lower() in idor_params:
+                    if v.isdigit():
+                        findings.append({
+                            "id": "SEQUENTIAL_ID_EXPOSED",
+                            "severity": "medium",
+                            "title": "Sequential Resource Identifier Exposed (Potential IDOR)",
+                            "description": f"Exposes sequential database ID '{v}' in query parameter '{k}'.",
+                            "impact": "Exposes resource references directly. If object-level authorization is missing, attackers can iterate IDs to scrape data.",
+                            "remediation": "Verify that backend endpoints enforce strict ownership validation on resource objects, and consider using UUIDs instead of sequential integers.",
+                            "reference": "https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html"
+                        })
+                        break
+
 def scan_github_content(rel_path, content, findings):
     cors_patterns = [
         (r'Access-Control-Allow-Origin.*\*', "CORS_WILDCARD_HEADERS", "medium", "Wildcard Access-Control-Allow-Origin configured in code", 
@@ -281,6 +328,51 @@ def scan_github_content(rel_path, content, findings):
                 "reference": "https://owasp.org/www-community/attacks/csrf"
             })
 
+    ssrf_patterns = [
+        (r'(fetch|axios\.(get|post|request))\(\s*(req\.(query|params|body)\.\w+|\w*\+req\.)', "GIT_SSRF_JS", "high", "Potential SSRF in Javascript Fetch",
+         "Sourcing request URL directly from user inputs allows Server-Side Request Forgery.",
+         "Validate and whitelist URL target inputs against a strict list of allowed domain names."),
+        (r'requests\.(get|post|request)\(\s*(\w*req|\w*input|\w*url)', "GIT_SSRF_PY", "high", "Potential SSRF in Python Requests",
+         "Outgoing request URL is dynamically formatted from variable parameters without validation.",
+         "Ensure user input is strictly validated or restricted to local path routing."),
+        (r'urlopen\(\s*(\w*req|\w*input|\w*url)', "GIT_SSRF_URLLIB", "high", "Potential SSRF in urllib open call",
+         "urllib is allowed to query arbitrary resource strings.",
+         "Restrict urlopen arguments or use safe library layers.")
+    ]
+    for pattern, fid, severity, title, impact, remediation in ssrf_patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            findings.append({
+                "id": fid,
+                "severity": severity,
+                "title": f"{title} ({rel_path})",
+                "description": f"Found potential SSRF fetch construct: '{match.group(0)}' in {rel_path}.",
+                "impact": impact,
+                "remediation": remediation,
+                "reference": "https://owasp.org/www-project-top-ten/2021/A10_2021-Server-Side_Request_Forgery_%28SSRF%29"
+            })
+
+    idor_patterns = [
+        (r'\.(findById|findOne|findByPk)\(\s*req\.(query|params)\.', "GIT_IDOR_JS", "high", "Direct Database Lookup on User Parameter (Potential IDOR)",
+         "Queries database objects directly using client-controlled keys without visible authorization gates.",
+         "Verify user session ownership on the queried resource before returning it to the client."),
+        (r'get_object_or_404\(\s*\w+\s*,\s*id\s*=\s*(request\.GET|request\.query|id)', "GIT_IDOR_PYTHON", "high", "Direct object reference lookup in Django view",
+         "Saves sequential integers directly to fetch objects without permission validation.",
+         "Ensure access control permissions check ownership rules for the fetched object.")
+    ]
+    for pattern, fid, severity, title, impact, remediation in idor_patterns:
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            findings.append({
+                "id": fid,
+                "severity": severity,
+                "title": f"{title} ({rel_path})",
+                "description": f"Found direct database reference mapping: '{match.group(0)}' in {rel_path}.",
+                "impact": impact,
+                "remediation": remediation,
+                "reference": "https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html"
+            })
+
 def scan_github(target):
     findings = []
     temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_medium", f"repo_{int(time.time() * 1000)}")
@@ -349,6 +441,8 @@ def scan(target_type, target):
             
             # Check SQLi & CSRF
             check_sqli_csrf_url(target, findings, parser)
+            # Check SSRF & IDOR
+            check_ssrf_idor_url(target, findings, parser)
         except Exception:
             pass
         
