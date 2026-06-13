@@ -149,6 +149,44 @@ def check_xxe_url(url, findings):
         except Exception:
             pass
 
+def check_unauthenticated_endpoints_url(url, findings):
+    paths = {
+        "/api/admin": ["admin", "users", "config", "settings", "role", "system"],
+        "/api/v1/users": ["email", "username", "role", "password", "id"],
+        "/admin/config": ["db_", "key", "secret", "host", "config", "password"],
+        "/admin/settings": ["setting", "config", "enable", "disable"],
+        "/config/": ["index of", "config", "database", "settings"],
+        "/admin/": ["dashboard", "admin panel", "login", "management", "console"]
+    }
+    
+    for path, keywords in paths.items():
+        test_url = urljoin(url, path)
+        try:
+            res = requests.get(test_url, timeout=3, allow_redirects=False)
+            if res.status_code == 200:
+                body = res.text.lower()
+                matched_keywords = [kw for kw in keywords if kw in body]
+                ct = res.headers.get('content-type', '').lower()
+                
+                is_sensitive = False
+                if "application/json" in ct and len(matched_keywords) >= 1:
+                    is_sensitive = True
+                elif len(matched_keywords) >= 2 and not ("login" in body and "username" in body and "password" in body and "form" in body):
+                    is_sensitive = True
+                    
+                if is_sensitive:
+                    findings.append({
+                        "id": f"UNAUTHENTICATED_ENDPOINT_{path.replace('/', '_').strip('_').upper()}",
+                        "severity": "high",
+                        "title": f"Unauthenticated API/Admin Endpoint Exposed: {path}",
+                        "description": f"The endpoint {path} was found publicly accessible and returned potentially sensitive data without authentication.",
+                        "impact": "Exposes administrative controls, user directories, or system configuration data to unauthenticated remote users.",
+                        "remediation": "Implement proper authentication and authorization checks (e.g. JWT verification, session middleware) before exposing this endpoint.",
+                        "reference": "https://cwe.mitre.org/data/definitions/306.html"
+                    })
+        except Exception:
+            pass
+
 def scan_github_content(rel_path, content, findings):
     patterns = [
         (r'cp\s+-r\s+\.git\s+', "GIT_EXPOSING_METADATA_SCRIPT", "high", "Script copying .git folder to build output",
@@ -177,7 +215,23 @@ def scan_github_content(rel_path, content, findings):
 
         (r'libxml_disable_entity_loader\s*\(\s*false\s*\)', "XXE_PHP_ENTITY_LOADER_ENABLED", "high", "PHP XML External Entity Loader Enabled",
          "The PHP script explicitly enables the libxml entity loader, which allows resolving external XML entities.",
-         "Remove libxml_disable_entity_loader(false) or set it to true to disable resolving external entities.", "https://cwe.mitre.org/data/definitions/611.html")
+         "Remove libxml_disable_entity_loader(false) or set it to true to disable resolving external entities.", "https://cwe.mitre.org/data/definitions/611.html"),
+
+        (r'\.\s*(create|update|updateMany|updateOne|findOneAndUpdate|insert|insertMany)\s*\(\s*(?:[^)]*,\s*)?req\.body\s*\)', "GITHUB_MASS_ASSIGNMENT_AUTOBINDING", "medium", "Mass Assignment / Parameter Binding Vulnerability",
+         "The application passes the raw request body (req.body) directly into database model updates/creation without filtering allowed fields.",
+         "Whitelist allowed fields before passing them to the database model (e.g. update({ email: req.body.email }) or use destructuring).", "https://cwe.mitre.org/data/definitions/915.html"),
+
+        (r'new\s+\w+\s*\(\s*req\.body\s*\)', "GITHUB_MASS_ASSIGNMENT_AUTOBINDING_NEW", "medium", "Mass Assignment / Parameter Binding Vulnerability (Instantiator)",
+         "The application passes the raw request body (req.body) directly into a class constructor, potentially autobinding database properties.",
+         "Sanitize and restrict the incoming request body object properties before instantiating.", "https://cwe.mitre.org/data/definitions/915.html"),
+
+        (r'router\.(get|post|put|delete)\s*\(\s*[\'"]\/(?:api\/)?(?:admin|settings|config|users)(?:\/[a-zA-Z0-9_:-]+)*[\'"]\s*,\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z0-9_]+)\s*=>', "GITHUB_MISSING_AUTH_MIDDLEWARE", "high", "Potentially Unauthenticated Administrative Route",
+         "An administrative or sensitive route is declared without apparent intermediate authentication/authorization middleware.",
+         "Add authentication and role-based access control middleware (e.g. requireAuth, isAdmin) to the route definition.", "https://cwe.mitre.org/data/definitions/306.html"),
+
+        (r'router\.(get|post|put|delete)\s*\(\s*[\'"]\/(?:api\/)?(?:admin|settings|config|users)(?:\/[a-zA-Z0-9_:-]+)*[\'"]\s*,\s*function\s*\(', "GITHUB_MISSING_AUTH_MIDDLEWARE_FUNC", "high", "Potentially Unauthenticated Administrative Route (Function syntax)",
+         "An administrative or sensitive route is declared without apparent intermediate authentication/authorization middleware.",
+         "Add authentication and role-based access control middleware (e.g. requireAuth, isAdmin) to the route definition.", "https://cwe.mitre.org/data/definitions/306.html")
     ]
     for pattern, fid, severity, title, impact, remediation, ref in patterns:
         match = re.search(pattern, content, re.IGNORECASE)
@@ -257,6 +311,9 @@ def scan(target_type, target):
         
         # Check XXE Injection
         check_xxe_url(target, findings)
+        
+        # Check Unauthenticated endpoints
+        check_unauthenticated_endpoints_url(target, findings)
         
     elif target_type == 'github':
         print(json.dumps({"progress": 50}))
