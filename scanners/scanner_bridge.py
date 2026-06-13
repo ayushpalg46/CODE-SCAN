@@ -2,6 +2,8 @@
 import sys
 import json
 import argparse
+import importlib
+import os
 
 def main():
     parser = argparse.ArgumentParser(description="Scanner Bridge CLI")
@@ -10,37 +12,39 @@ def main():
     parser.add_argument("--mode", required=True, choices=["basic", "medium", "advanced"])
     args = parser.parse_args()
 
-    results = {
-        "status": "success",
-        "target": args.target,
-        "mode": args.mode,
-        "findings": []
-    }
+    # Dynamic import based on mode
+    module_name = f"{args.mode}_scanner"
+    try:
+        # Add local dir to path to make imports work reliably
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        
+        # Load the scanner module
+        scanner_module = importlib.import_module(module_name)
+    except Exception as e:
+        error_result = {
+            "status": "error",
+            "target": args.target,
+            "mode": args.mode,
+            "findings": [],
+            "error": f"Failed to load scanner module '{module_name}': {str(e)}"
+        }
+        print(json.dumps(error_result, indent=2))
+        sys.exit(1)
 
-    # Custom behaviors depending on scan depth mode
-    if args.mode == "basic":
-        # Normal Common Scan For Any flaw
-        results["findings"].append({
-            "severity": "low",
-            "module": "StaticAnalysis",
-            "message": "Common configuration recommendation: verify target headers."
-        })
-    elif args.mode == "medium":
-        # Intermediate Scan
-        results["findings"].append({
-            "severity": "medium",
-            "module": "IntermediateAudit",
-            "message": "Intermediate scan check completed: review library components."
-        })
-    elif args.mode == "advanced":
-        # Advanced Scan
-        results["findings"].append({
-            "severity": "high",
-            "module": "AdvancedAudit",
-            "message": "Deep scanning logic executed."
-        })
-
-    print(json.dumps(results, indent=2))
+    try:
+        # Run scan
+        results = scanner_module.scan(args.type, args.target)
+        print(json.dumps(results, indent=2))
+    except Exception as e:
+        error_result = {
+            "status": "error",
+            "target": args.target,
+            "mode": args.mode,
+            "findings": [],
+            "error": f"Scan failed during execution: {str(e)}"
+        }
+        print(json.dumps(error_result, indent=2))
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

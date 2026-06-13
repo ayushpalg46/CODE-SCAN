@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import { spawn } from 'child_process';
+import path from 'path';
 
 // In-memory job state store
 const scanStore = new Map();
@@ -92,57 +94,111 @@ const runScanSubprocess = async (scanId, targetType, targetValue, scanMode) => {
   if (!job) return;
 
   job.status = 'running';
-  job.progress = 10;
+  job.progress = 15;
+  scanStore.set(scanId, job);
+
+  const scriptPath = path.join(process.cwd(), 'scanners', 'scanner_bridge.py');
 
   try {
-    // Basic Mode: Normal common vulnerability tests (low-medium level findings)
-    if (scanMode === 'basic') {
-      await simulateDelay(2000);
-      job.progress = 50;
-      await simulateDelay(2000);
-      job.progress = 100;
-      job.status = 'completed';
-      job.results = {
-        findings: [
-          { module: 'Headers', severity: 'low', description: 'Missing X-Frame-Options security header.' }
-        ]
-      };
-    } 
-    // Medium Mode: Intermediate scan tests (medium-high level findings)
-    else if (scanMode === 'medium') {
-      await simulateDelay(3000);
-      job.progress = 40;
-      await simulateDelay(3000);
-      job.progress = 100;
-      job.status = 'completed';
-      job.results = {
-        findings: [
-          { module: 'Dependencies', severity: 'medium', description: 'Outdated library path-to-regexp (CVE-2024-43796).' }
-        ]
-      };
-    } 
-    // Advanced Mode: Deep code/structural tests (high-critical level findings)
-    else if (scanMode === 'advanced') {
-      await simulateDelay(4000);
-      job.progress = 30;
-      await simulateDelay(4000);
-      job.progress = 100;
-      job.status = 'completed';
-      job.results = {
-        findings: [
-          { module: 'InputValidation', severity: 'high', description: 'Reflected payload observed in DOM.' }
-        ]
-      };
-    }
+    const pythonProcess = spawn('python', [
+      scriptPath,
+      '--type', targetType,
+      '--target', targetValue,
+      '--mode', scanMode
+    ]);
 
-    job.completedAt = Date.now();
-    scanStore.set(scanId, job);
+    let stdoutData = '';
+    let stderrData = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      stdoutData += data.toString();
+      // Handle progress lines
+      const lines = stdoutData.split('\n');
+      for (const line of lines) {
+        if (line.trim().startsWith('{"progress":')) {
+          try {
+            const parsed = JSON.parse(line.trim());
+            if (parsed.progress !== undefined) {
+              job.progress = parsed.progress;
+              scanStore.set(scanId, job);
+            }
+          } catch (e) {
+            // Ignore parse error
+          }
+        }
+      }
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      stderrData += data.toString();
+    });
+
+    pythonProcess.on('close', (code) => {
+      const updatedJob = scanStore.get(scanId);
+      if (!updatedJob) return;
+
+      updatedJob.completedAt = Date.now();
+
+      if (code !== 0) {
+        console.error(`Scanner process exited with code ${code}. Stderr: ${stderrData}`);
+        updatedJob.status = 'failed';
+        updatedJob.error = `Scanner process exited with code ${code}. Stderr: ${stderrData.substring(0, 500)}`;
+        scanStore.set(scanId, updatedJob);
+        return;
+      }
+
+      try {
+        const jsonMatch = stdoutData.match(/\{[\s\S]*\}/g);
+        if (!jsonMatch) {
+          throw new Error('No valid JSON structure found in scanner output.');
+        }
+        const finalJsonStr = jsonMatch[jsonMatch.length - 1];
+        const result = JSON.parse(finalJsonStr);
+
+        const findings = result.findings || [];
+        let rawScore = 0;
+        const summary = { critical: 0, high: 0, medium: 0, low: 0 };
+
+        for (const finding of findings) {
+          const severity = (finding.severity || 'low').toLowerCase();
+          if (severity === 'critical') {
+            rawScore += 40;
+            summary.critical++;
+          } else if (severity === 'high') {
+            rawScore += 20;
+            summary.high++;
+          } else if (severity === 'medium') {
+            rawScore += 10;
+            summary.medium++;
+          } else {
+            rawScore += 5;
+            summary.low++;
+          }
+        }
+
+        const score = 100 - Math.min(rawScore, 100);
+
+        updatedJob.status = 'completed';
+        updatedJob.progress = 100;
+        updatedJob.results = {
+          findings,
+          score,
+          summary
+        };
+      } catch (err) {
+        console.error('Failed to parse scanner output JSON:', err, 'Stdout:', stdoutData);
+        updatedJob.status = 'failed';
+        updatedJob.error = `Invalid scanner output: ${err.message}`;
+      }
+
+      scanStore.set(scanId, updatedJob);
+    });
+
   } catch (err) {
+    console.error('Error spawning scanner process:', err);
     job.status = 'failed';
-    job.error = err.message;
+    job.error = `Failed to start scanner process: ${err.message}`;
     job.completedAt = Date.now();
     scanStore.set(scanId, job);
   }
 };
-
-const simulateDelay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
