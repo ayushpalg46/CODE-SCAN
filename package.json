@@ -1,0 +1,10 @@
+{
+  "name": "lightweight-vulnerability-scanner",
+  "version": "1.0.0",
+  "description": "A lightweight vulnerability scanner dashboard built with Express and Python.",
+  "private": true,
+  "scripts": {
+    "start": "node backend/src/server.js",
+    "backend-dev": "node --watch backend/src/server.js"
+  }
+}
