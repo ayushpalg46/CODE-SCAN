@@ -85,26 +85,111 @@ def check_debug_actuators_url(url, findings):
         except Exception:
             pass
 
+def check_clickjacking_url(url, findings):
+    try:
+        res = requests.get(url, timeout=3)
+        headers = {k.lower(): v for k, v in res.headers.items()}
+        
+        has_xfo = False
+        xfo = headers.get('x-frame-options', '').lower()
+        if 'deny' in xfo or 'sameorigin' in xfo:
+            has_xfo = True
+            
+        has_csp_fa = False
+        csp = headers.get('content-security-policy', '').lower()
+        if csp and 'frame-ancestors' in csp:
+            has_csp_fa = True
+            
+        if not has_xfo and not has_csp_fa:
+            findings.append({
+                "id": "CLICKJACKING_PROTECTION_MISSING",
+                "severity": "medium",
+                "title": "Clickjacking (UI Redress) Protection Missing",
+                "description": f"The website at {url} does not configure X-Frame-Options or Content-Security-Policy with frame-ancestors to restrict framing.",
+                "impact": "Malicious websites can embed this site in an iframe, potentially hijacking user interactions (e.g. click hijacking, UI redressing).",
+                "remediation": "Set X-Frame-Options header to 'DENY' or 'SAMEORIGIN', or use the 'frame-ancestors' directive in your Content-Security-Policy.",
+                "reference": "https://cwe.mitre.org/data/definitions/1021.html"
+            })
+    except Exception:
+        pass
+
+def check_xxe_url(url, findings):
+    xml_payload = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE test [
+  <!ENTITY xxe "XXE_REFLECTED_TEST_PAYLOAD" >
+]>
+<test>&xxe;</test>"""
+
+    # We send it to common endpoints
+    endpoints = [
+        url,
+        urljoin(url, "/api/xml"),
+        urljoin(url, "/xml"),
+        urljoin(url, "/api/v1/xml")
+    ]
+    
+    headers = {
+        "Content-Type": "application/xml"
+    }
+    
+    for endpoint in endpoints:
+        try:
+            res = requests.post(endpoint, data=xml_payload, headers=headers, timeout=3)
+            if res.status_code in [200, 201] and "XXE_REFLECTED_TEST_PAYLOAD" in res.text:
+                findings.append({
+                    "id": "XXE_INJECTION_ENABLED",
+                    "severity": "high",
+                    "title": "XML External Entity (XXE) Injection Enabled",
+                    "description": f"The endpoint {endpoint} parsed XML input and reflected the content of a custom entity.",
+                    "impact": "Indicates that the XML parser is processing entity declarations, which can be abused to perform local file read, internal port scanning (SSRF), or Denial of Service.",
+                    "remediation": "Configure your XML parser to disable external entities (DTDs) and external schema resolutions.",
+                    "reference": "https://cwe.mitre.org/data/definitions/611.html"
+                })
+                break
+        except Exception:
+            pass
+
 def scan_github_content(rel_path, content, findings):
-    git_expose_patterns = [
+    patterns = [
         (r'cp\s+-r\s+\.git\s+', "GIT_EXPOSING_METADATA_SCRIPT", "high", "Script copying .git folder to build output",
          "Copies the entire repository history into the deployable web folders, causing public exposure.",
-         "Modify build scripts to exclude the .git directory when packaging assets."),
+         "Modify build scripts to exclude the .git directory when packaging assets.", "https://cwe.mitre.org/data/definitions/489.html"),
+        
         (r'management\.endpoints\.web\.exposure\.include\s*=\s*([\'"]\*[\'"]|\*|\d)', "GIT_SPRING_ACTUATOR_EXPOSED", "high", "Spring Boot Actuators publicly exposed",
          "Exposes administrative monitoring features (like heapdump or env) to all users.",
-         "Restrict web exposure to health and info endpoints: management.endpoints.web.exposure.include=health,info.")
+         "Restrict web exposure to health and info endpoints: management.endpoints.web.exposure.include=health,info.", "https://cwe.mitre.org/data/definitions/489.html"),
+         
+        (r'frameguard\s*:\s*false', "GITHUB_CLICKJACKING_HELMET_DISABLED", "medium", "Express Helmet Frameguard Disabled",
+         "The application explicitly disables helmet's frameguard middleware, leaving the site unprotected against Clickjacking.",
+         "Enable frameguard in helmet: remove frameguard: false or set x-frame-options header manually.", "https://cwe.mitre.org/data/definitions/1021.html"),
+         
+        (r'X_FRAME_OPTIONS\s*=\s*[\'"]ALLOW-FROM[\'"]', "GITHUB_CLICKJACKING_DJANGO_ALLOW_FROM", "medium", "Django Insecure X-Frame-Options Configuration",
+         "The application configures Django's X_FRAME_OPTIONS to ALLOW-FROM, which is obsolete and unsupported in many modern browsers.",
+         "Update X_FRAME_OPTIONS to 'DENY' or 'SAMEORIGIN' in Django settings.", "https://cwe.mitre.org/data/definitions/1021.html"),
+
+        (r'resolve_entities\s*=\s*True', "XXE_LXML_RESOLVE_ENTITIES_ENABLED", "high", "LXML XML External Entity Resolution Enabled",
+         "The application configures the lxml XML parser to resolve entities, which makes it vulnerable to XXE injection.",
+         "Set resolve_entities=False in your XMLParser configuration.", "https://cwe.mitre.org/data/definitions/611.html"),
+
+        (r'DocumentBuilderFactory\s+\w+\s*=\s*DocumentBuilderFactory\.newInstance', "XXE_JAVA_DOCUMENT_BUILDER_FACTORY", "medium", "Java DocumentBuilderFactory potentially vulnerable to XXE",
+         "DocumentBuilderFactory is instantiated. If DTD and external entities are not explicitly disabled, this parser is vulnerable to XXE.",
+         "Configure DocumentBuilderFactory to disallow DOCTYPE declarations: factory.setFeature(\"http://apache.org/xml/features/disallow-doctype-decl\", true).", "https://cwe.mitre.org/data/definitions/611.html"),
+
+        (r'libxml_disable_entity_loader\s*\(\s*false\s*\)', "XXE_PHP_ENTITY_LOADER_ENABLED", "high", "PHP XML External Entity Loader Enabled",
+         "The PHP script explicitly enables the libxml entity loader, which allows resolving external XML entities.",
+         "Remove libxml_disable_entity_loader(false) or set it to true to disable resolving external entities.", "https://cwe.mitre.org/data/definitions/611.html")
     ]
-    for pattern, fid, severity, title, impact, remediation in git_expose_patterns:
+    for pattern, fid, severity, title, impact, remediation, ref in patterns:
         match = re.search(pattern, content, re.IGNORECASE)
         if match:
             findings.append({
                 "id": fid,
                 "severity": severity,
                 "title": f"{title} ({rel_path})",
-                "description": f"Found deployment signature exposing metadata: '{match.group(0)}' in {rel_path}.",
+                "description": f"Found signature: '{match.group(0)}' in {rel_path}.",
                 "impact": impact,
                 "remediation": remediation,
-                "reference": "https://cwe.mitre.org/data/definitions/489.html"
+                "reference": ref
             })
 
 def scan_github(target):
@@ -152,17 +237,26 @@ def scan(target_type, target):
         if not target.startswith(('http://', 'https://')):
             target = 'https://' + target
             
-        print(json.dumps({"progress": 50}))
+        print(json.dumps({"progress": 40}))
         sys.stdout.flush()
         
         # Check Exposed .git files
         check_git_exposure_url(target, findings)
         
-        print(json.dumps({"progress": 75}))
+        print(json.dumps({"progress": 60}))
         sys.stdout.flush()
         
         # Check Exposed Debug/Actuator endpoints
         check_debug_actuators_url(target, findings)
+        
+        print(json.dumps({"progress": 80}))
+        sys.stdout.flush()
+        
+        # Check Clickjacking protection
+        check_clickjacking_url(target, findings)
+        
+        # Check XXE Injection
+        check_xxe_url(target, findings)
         
     elif target_type == 'github':
         print(json.dumps({"progress": 50}))
