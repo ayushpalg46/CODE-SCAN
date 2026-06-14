@@ -1,6 +1,10 @@
 import crypto from 'crypto';
 import { spawn } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // In-memory job state store
 const scanStore = new Map();
@@ -97,7 +101,7 @@ const runScanSubprocess = async (scanId, targetType, targetValue, scanMode) => {
   job.progress = 15;
   scanStore.set(scanId, job);
 
-  const scriptPath = path.join(process.cwd(), 'scanners', 'scanner_bridge.py');
+  const scriptPath = path.resolve(__dirname, '..', '..', '..', 'scanners', 'scanner_bridge.py');
 
   try {
     const pythonProcess = spawn('python', [

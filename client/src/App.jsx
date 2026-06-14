@@ -122,6 +122,7 @@ function App() {
           <Question3Page 
             activeTab={activeTab} 
             setActiveTab={handleTabChange} 
+            scanType={scanType}
             onSubmit={handleSubmitUrl}
           />
         );

@@ -1237,6 +1237,16 @@ html, body, #root {
   box-shadow: 0 0 15px rgba(255, 0, 0, 0.2);
 }
 
+.board-2cb1a85f7508.invalid-touched {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.3) !important;
+}
+
+.board-2cb1a85f7508.valid-touched {
+  border-color: #10b981 !important;
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.3) !important;
+}
+
 /* Text Input element styling */
 .q2-text-input {
   width: 100%;
@@ -1256,6 +1266,24 @@ html, body, #root {
   font-family: 'Bitcount Prop Single', sans-serif;
 }
 
+/* Validation Feedback Messages */
+.validation-message {
+  font-family: 'Lexend Deca', sans-serif;
+  font-size: 1.1rem;
+  margin-top: -35px;
+  margin-bottom: -15px;
+  text-align: center;
+  transition: all 0.2s ease;
+}
+
+.validation-message.error {
+  color: #ef4444;
+}
+
+.validation-message.success {
+  color: #10b981;
+}
+
 /* Submit Button container frame */
 .board-2cb1e91ee621 {
   background-color: #ffffff;
@@ -1271,13 +1299,23 @@ html, body, #root {
   user-select: none;
 }
 
-.board-2cb1e91ee621:hover {
+.board-2cb1e91ee621:hover:not(:disabled) {
   background-color: #f0f0f0;
   transform: scale(1.02);
 }
 
-.board-2cb1e91ee621:active {
+.board-2cb1e91ee621:active:not(:disabled) {
   transform: scale(0.98);
+}
+
+.board-2cb1e91ee621:disabled {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  cursor: not-allowed !important;
+  transform: none !important;
+}
+
+.board-2cb1e91ee621:disabled * {
+  color: rgba(255, 255, 255, 0.3) !important;
 }
 
 /* SUBMIT text inside button */
