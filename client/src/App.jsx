@@ -8,6 +8,10 @@ import Question5Page from './pages/Question5Page';
 import LoadingPage from './pages/LoadingPage';
 import ResultsPage from './pages/ResultsPage';
 import FeedbackPage from './pages/FeedbackPage';
+import AboutUsPage from './pages/AboutUsPage';
+import HistoryPage from './pages/HistoryPage';
+import ReportPage from './pages/ReportPage';
+import SolutionPage from './pages/SolutionPage';
 import Navbar from './components/Navbar';
 
 function App() {
@@ -24,6 +28,7 @@ function App() {
   const [techStack, setTechStack] = useState('');
   const [scanLevel, setScanLevel] = useState('');
   const [scanResults, setScanResults] = useState(null);
+  const [scanHistory, setScanHistory] = useState([]);
 
   const handleLetsGo = () => {
     setScanStarted(true);
@@ -63,6 +68,25 @@ function App() {
   const handleScanComplete = (results) => {
     console.log('Scan completed with results:', results);
     setScanResults(results);
+
+    // Build history entry
+    const findingsCount = results?.findings?.length || 0;
+    const summary = results?.summary || {};
+    let riskLevel = 'LOW';
+    if (summary.critical > 0 || summary.high > 0) riskLevel = 'HIGH';
+    else if (summary.medium > 0) riskLevel = 'MEDIUM';
+
+    setScanHistory(prev => [...prev, {
+      projectName: projectName || scanTarget,
+      vulnDetected: findingsCount,
+      vulnSolved: 0,
+      scanLevel,
+      riskLevel,
+      findings: results?.findings || [],
+      score: results?.score !== undefined ? results.score : 80,
+      timestamp: Date.now(),
+    }]);
+
     setStep(7);
   };
 
@@ -169,8 +193,39 @@ function App() {
         />
       );
     }
+  } else if (activeTab === 'HISTORY') {
+    return (
+      <HistoryPage
+        activeTab={activeTab}
+        setActiveTab={handleTabChange}
+        scanHistory={scanHistory}
+      />
+    );
+  } else if (activeTab === 'REPORT') {
+    return (
+      <ReportPage
+        activeTab={activeTab}
+        setActiveTab={handleTabChange}
+        scanHistory={scanHistory}
+      />
+    );
+  } else if (activeTab === 'SOLUTION') {
+    return (
+      <SolutionPage
+        activeTab={activeTab}
+        setActiveTab={handleTabChange}
+        scanHistory={scanHistory}
+      />
+    );
+  } else if (activeTab === 'ABOUT US') {
+    return (
+      <AboutUsPage
+        activeTab={activeTab}
+        setActiveTab={handleTabChange}
+      />
+    );
   } else {
-    // Other tabs placeholders (e.g. HISTORY, REPORT, ABOUT US, SOLUTION)
+    // Other tabs placeholders
     return (
       <div className="frame board-2ca2c79e627d">
         <Navbar activeTab={activeTab} setActiveTab={handleTabChange} page={1} />

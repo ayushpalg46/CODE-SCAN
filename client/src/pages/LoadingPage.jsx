@@ -107,6 +107,7 @@ export default function LoadingPage({ activeTab, setActiveTab, scanType, scanTar
   }
 
   useEffect(() => {
+    let active = true;
     isMountedRef.current = true;
     
     // 1. Trigger scan request on mount
@@ -125,14 +126,14 @@ export default function LoadingPage({ activeTab, setActiveTab, scanType, scanTar
           }),
         });
 
-        if (!isMountedRef.current) return;
+        if (!active) return;
 
         if (!response.ok) {
           throw new Error(`Server responded with status ${response.status}`);
         }
 
         const data = await response.json();
-        if (!isMountedRef.current) return;
+        if (!active) return;
 
         if (data.scanId) {
           setScanId(data.scanId);
@@ -141,7 +142,7 @@ export default function LoadingPage({ activeTab, setActiveTab, scanType, scanTar
           throw new Error('No scanId returned from backend.');
         }
       } catch (err) {
-        if (!isMountedRef.current) return;
+        if (!active) return;
         console.warn('Backend failed to start scan, starting simulated fallback scan:', err);
         startSimulation();
       }
@@ -150,6 +151,7 @@ export default function LoadingPage({ activeTab, setActiveTab, scanType, scanTar
     startScanJob();
 
     return () => {
+      active = false;
       isMountedRef.current = false;
       if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
       if (simulationIntervalRef.current) clearInterval(simulationIntervalRef.current);
