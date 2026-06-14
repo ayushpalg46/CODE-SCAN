@@ -148,11 +148,13 @@ const runScanSubprocess = async (scanId, targetType, targetValue, scanMode) => {
       }
 
       try {
-        const jsonMatch = stdoutData.match(/\{[\s\S]*\}/g);
-        if (!jsonMatch) {
+        const lines = stdoutData.split('\n');
+        const nonProgressLines = lines.filter(line => !line.trim().startsWith('{"progress":'));
+        const finalJsonStr = nonProgressLines.join('\n').trim();
+        
+        if (!finalJsonStr) {
           throw new Error('No valid JSON structure found in scanner output.');
         }
-        const finalJsonStr = jsonMatch[jsonMatch.length - 1];
         const result = JSON.parse(finalJsonStr);
 
         const findings = result.findings || [];
