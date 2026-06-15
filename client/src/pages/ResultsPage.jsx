@@ -32,10 +32,9 @@ export default function ResultsPage({
   const displayProjectName = projectName || getProjectName(scanTarget);
   const totalScore = scanResults?.score !== undefined ? scanResults.score : 80;
   
-  // Calculate relative scores based on total score
-  const qualityScore = Math.min(100, Math.max(0, totalScore + 5));
-  const securityScore = totalScore;
-  const performanceScore = Math.min(100, Math.max(0, totalScore + 10));
+  const qualityScore = scanResults?.qualityScore !== undefined ? scanResults.qualityScore : 85;
+  const securityScore = scanResults?.securityScore !== undefined ? scanResults.securityScore : 80;
+  const performanceScore = scanResults?.performanceScore !== undefined ? scanResults.performanceScore : 90;
 
   const findingsCount = scanResults?.findings?.length || 0;
   
@@ -142,18 +141,29 @@ export default function ResultsPage({
         </div>
 
         {/* Row 6: Fix & Solution Banner */}
-        <div className="frame board-2cbeb90440b6">
+        <div className="frame board-2cbeb90440b6" style={{ display: 'flex', flexDirection: 'column', gap: '20px', alignItems: 'center' }}>
           <div className="shape text want-to-fi-2cc01f521c45">
-            Want To Fix The Project Vulnerability’s GO To The
+            Want To Fix Vulnerabilities or Export the PDF Report? GO To:
           </div>
-          <button 
-            key="results-solution-btn"
-            type="button"
-            className="shape text s-o-l-u-t-i-o-n-2cc02b687bba solution-nav-btn"
-            onClick={() => setActiveTab('SOLUTION')}
-          >
-            SOLUTION
-          </button>
+          <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <button 
+              key="results-solution-btn"
+              type="button"
+              className="shape text s-o-l-u-t-i-o-n-2cc02b687bba solution-nav-btn"
+              onClick={() => setActiveTab('SOLUTION')}
+            >
+              SOLUTION
+            </button>
+            <button 
+              key="results-report-btn"
+              type="button"
+              className="shape text s-o-l-u-t-i-o-n-2cc02b687bba solution-nav-btn"
+              onClick={() => setActiveTab('REPORT')}
+              style={{ background: 'linear-gradient(135deg, #ff3333 0%, #ff6600 100%)', boxShadow: '0 0 15px rgba(255, 51, 51, 0.4)' }}
+            >
+              REPORT
+            </button>
+          </div>
         </div>
 
         {/* Row 7: Feedback Banner */}

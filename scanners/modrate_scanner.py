@@ -568,6 +568,193 @@ def scan_github_content(rel_path, content, findings):
                 "reference": "https://cheatsheetseries.owasp.org/cheatsheets/Denial_of_Service_Prevention_Cheat_Sheet.html"
             })
 
+def calculate_scores(target_type, target, findings, html_content=None, headers=None, response_time=None, repo_path=None):
+    # 1. Security Score
+    security_score = 100
+    for f in findings:
+        severity = f.get('severity', 'low').lower()
+        if severity == 'critical':
+            security_score -= 30
+        elif severity == 'high':
+            security_score -= 20
+        elif severity == 'medium':
+            security_score -= 10
+        else:
+            security_score -= 5
+    security_score = max(0, security_score)
+
+    # 2. Quality Score & 3. Performance Score
+    quality_score = 100
+    performance_score = 100
+
+    if target_type == 'url':
+        # Quality (HTTPS and SEO checks)
+        if not target.startswith('https://'):
+            quality_score -= 15
+        
+        if html_content:
+            html_lower = html_content.lower()
+            if '<title>' not in html_lower or '</title>' not in html_lower:
+                quality_score -= 15
+            if 'name="description"' not in html_lower and "name='description'" not in html_lower:
+                quality_score -= 15
+            if '<h1' not in html_lower or '</h1>' not in html_lower:
+                quality_score -= 15
+            
+            img_tags = re.findall(r'<img[^>]*>', html_content, re.IGNORECASE)
+            if img_tags:
+                missing_alt = 0
+                for img in img_tags:
+                    if 'alt=' not in img.lower():
+                        missing_alt += 1
+                if missing_alt > 0:
+                    quality_score -= min(15, missing_alt * 5)
+        else:
+            quality_score = 50
+
+        # Performance (Response time & Caching)
+        if response_time is not None:
+            if response_time < 0.2:
+                pass
+            elif response_time < 0.5:
+                performance_score -= 5
+            elif response_time < 1.0:
+                performance_score -= 15
+            elif response_time < 2.0:
+                performance_score -= 30
+            else:
+                performance_score -= 50
+        else:
+            performance_score = 50
+
+        if headers:
+            cache_header = headers.get('Cache-Control', '')
+            if not cache_header:
+                performance_score -= 10
+            elif 'no-store' in cache_header or 'no-cache' in cache_header:
+                performance_score -= 5
+        else:
+            performance_score -= 10
+
+    elif target_type == 'github':
+        # Quality
+        has_readme = False
+        has_gitignore = False
+        has_lint = False
+        has_test = False
+        total_lines = 0
+        comment_lines = 0
+        
+        if repo_path and os.path.exists(repo_path):
+            for root, dirs, files in os.walk(repo_path):
+                if '.git' in dirs: dirs.remove('.git')
+                if 'node_modules' in dirs: dirs.remove('node_modules')
+                
+                for file in files:
+                    file_lower = file.lower()
+                    if 'readme' in file_lower:
+                        has_readme = True
+                    if file_lower == '.gitignore':
+                        has_gitignore = True
+                    if file_lower in ['.eslintrc', '.eslintrc.json', '.eslintrc.js', '.prettierrc', 'tsconfig.json', 'pylintrc', 'setup.cfg', '.jshintrc']:
+                        has_lint = True
+                    if 'test' in file_lower or 'jest.config' in file_lower or 'pytest.ini' in file_lower or 'conftest.py' in file_lower:
+                        has_test = True
+                        
+                    if file.endswith(('.js', '.ts', '.py', '.java', '.cpp', '.h', '.cs', '.go', '.rb', '.php')):
+                        try:
+                            filepath = os.path.join(root, file)
+                            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                                for line in f:
+                                    total_lines += 1
+                                    trimmed = line.strip()
+                                    if trimmed.startswith(('#', '//', '/*', '*')):
+                                        comment_lines += 1
+                        except:
+                            pass
+            
+            if not has_readme:
+                quality_score -= 20
+            if not has_gitignore:
+                quality_score -= 15
+            if not has_lint:
+                quality_score -= 15
+            if not has_test:
+                quality_score -= 15
+                
+            if total_lines > 0:
+                doc_pct = comment_lines / total_lines
+                if doc_pct < 0.05:
+                    quality_score -= 15
+                elif doc_pct < 0.10:
+                    quality_score -= 10
+                elif doc_pct < 0.15:
+                    quality_score -= 5
+            else:
+                quality_score -= 10
+        else:
+            quality_score = 50
+
+        # Performance (large files, uncompressed assets, dependencies count)
+        large_files_count = 0
+        uncompressed_assets = 0
+        dependency_count = 0
+        
+        if repo_path and os.path.exists(repo_path):
+            for root, dirs, files in os.walk(repo_path):
+                if '.git' in dirs: dirs.remove('.git')
+                if 'node_modules' in dirs: dirs.remove('node_modules')
+                
+                for file in files:
+                    filepath = os.path.join(root, file)
+                    try:
+                        size_mb = os.path.getsize(filepath) / (1024 * 1024)
+                        if size_mb > 1.0:
+                            large_files_count += 1
+                    except:
+                        pass
+                        
+                    file_lower = file.lower()
+                    if file_lower.endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                        if any(folder in root.lower().replace('\\', '/') for folder in ['public', 'static', 'assets', 'dist', 'www']):
+                            try:
+                                if os.path.getsize(filepath) > 200 * 1024:
+                                    uncompressed_assets += 1
+                            except:
+                                pass
+                    
+                    if file_lower == 'package.json':
+                        try:
+                            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                                pkg_data = json.load(f)
+                                deps = pkg_data.get('dependencies', {})
+                                dev_deps = pkg_data.get('devDependencies', {})
+                                dependency_count = len(deps) + len(dev_deps)
+                        except:
+                            pass
+                            
+            if large_files_count > 0:
+                performance_score -= min(30, large_files_count * 10)
+            if uncompressed_assets > 0:
+                performance_score -= min(15, uncompressed_assets * 5)
+            if dependency_count > 25:
+                performance_score -= 10
+            elif dependency_count > 15:
+                performance_score -= 5
+        else:
+            performance_score = 50
+
+    quality_score = max(30, quality_score)
+    performance_score = max(30, performance_score)
+    total_score = int(round((security_score + quality_score + performance_score) / 3))
+    
+    return {
+        "securityScore": security_score,
+        "qualityScore": quality_score,
+        "performanceScore": performance_score,
+        "totalScore": total_score
+    }
+
 def scan_github(target):
     findings = []
     temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_medium", f"repo_{int(time.time() * 1000)}")
@@ -597,17 +784,19 @@ def scan_github(target):
                     scan_github_content(rel_path, content, findings)
                 except Exception:
                     pass
+                    
+        scores = calculate_scores('github', target, findings, repo_path=temp_dir)
+        return findings, scores
     finally:
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
-            
-    return findings
 
 def scan(target_type, target):
     print(json.dumps({"progress": 20}))
     sys.stdout.flush()
     
     findings = []
+    scores = None
     
     if target_type == 'url':
         if not target.startswith(('http://', 'https://')):
@@ -616,6 +805,15 @@ def scan(target_type, target):
         print(json.dumps({"progress": 40}))
         sys.stdout.flush()
         
+        # Verify URL is reachable first
+        start_time = time.time()
+        try:
+            res = requests.get(target, timeout=5)
+            response_time = time.time() - start_time
+            html_content = res.text
+        except Exception as e:
+            raise RuntimeError(f"Failed to connect to target URL '{target}': {str(e)}")
+            
         # Check CORS
         check_cors_url(target, findings)
         
@@ -625,41 +823,38 @@ def scan(target_type, target):
         # Check Swagger
         check_swagger_url(target, findings)
         
-        try:
-            res = requests.get(target, timeout=5)
-            html_content = res.text
-            parser = WebParser()
-            parser.feed(html_content)
-            
-            print(json.dumps({"progress": 80}))
-            sys.stdout.flush()
-            
-            # Check SQLi & CSRF
-            check_sqli_csrf_url(target, findings, parser)
-            # Check SSRF & IDOR
-            check_ssrf_idor_url(target, findings, parser)
-            # Check Outdated, Crypto & Deserialization
-            check_outdated_crypto_deserialization_url(target, findings, res.headers, html_content, parser, res.cookies)
-            # Check Rate Limiting
-            check_rate_limiting_url(target, findings)
-        except Exception:
-            pass
+        parser = WebParser()
+        parser.feed(html_content)
+        
+        print(json.dumps({"progress": 80}))
+        sys.stdout.flush()
+        
+        # Check SQLi & CSRF
+        check_sqli_csrf_url(target, findings, parser)
+        # Check SSRF & IDOR
+        check_ssrf_idor_url(target, findings, parser)
+        # Check Outdated, Crypto & Deserialization
+        check_outdated_crypto_deserialization_url(target, findings, res.headers, html_content, parser, res.cookies)
+        # Check Rate Limiting
+        check_rate_limiting_url(target, findings)
+        
+        scores = calculate_scores('url', target, findings, html_content=html_content, headers=res.headers, response_time=response_time)
         
     elif target_type == 'github':
         print(json.dumps({"progress": 50}))
         sys.stdout.flush()
+        
+        # Verify repository exists and is accessible before scanning
         try:
-            findings = scan_github(target)
+            check_res = requests.head(target, timeout=5, headers={"User-Agent": "Mozilla/5.0"})
+            if check_res.status_code == 404:
+                raise ValueError("The GitHub repository does not exist or is private.")
         except Exception as e:
-            findings.append({
-                "id": "MEDIUM_GITHUB_SCAN_FAILED",
-                "severity": "high",
-                "title": "GitHub Scan Failed",
-                "description": f"Failed to clone or scan the repository: {str(e)}",
-                "impact": "No source code checks could be performed.",
-                "remediation": "Verify the GitHub repository is public and accessible.",
-                "reference": "https://cwe.mitre.org/data/definitions/30.html"
-            })
+            if "private" in str(e):
+                raise
+            raise RuntimeError(f"Failed to verify GitHub repository connectivity: {str(e)}")
+
+        findings, scores = scan_github(target)
             
     print(json.dumps({"progress": 100}))
     sys.stdout.flush()
@@ -668,5 +863,6 @@ def scan(target_type, target):
         "status": "success",
         "target": target,
         "mode": "medium",
-        "findings": findings
+        "findings": findings,
+        "scores": scores
     }

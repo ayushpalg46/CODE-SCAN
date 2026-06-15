@@ -5,6 +5,7 @@ export default function Question3Page({ activeTab, setActiveTab, scanType, onSub
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const [touched, setTouched] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
 
   // Validate the URL/Link whenever it or the scanType changes
   useEffect(() => {
@@ -98,10 +99,45 @@ export default function Question3Page({ activeTab, setActiveTab, scanType, onSub
     }
   }, [url, scanType, touched]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (url.trim() && !error && onSubmit) {
-      onSubmit(url.trim());
+    if (!url.trim() || error || isValidating) return;
+
+    setIsValidating(true);
+    setError('');
+
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.MODE === 'production' ? window.location.origin : 'http://localhost:5000');
+      const response = await fetch(`${apiBase}/api/scan/validate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          targetType: scanType,
+          targetValue: url.trim()
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.valid && onSubmit) {
+          onSubmit(data.canonicalUrl || url.trim());
+        } else {
+          setError(data.error || 'The target website or repository is unreachable.');
+        }
+      } else {
+        const errData = await response.json();
+        setError(errData.error || 'The target website or repository is unreachable.');
+      }
+    } catch (err) {
+      console.warn('Backend validation failed, falling back to local format validation:', err);
+      // Connection refused/backend offline: proceed since format is local-validated
+      if (onSubmit) {
+        onSubmit(url.trim());
+      }
+    } finally {
+      setIsValidating(false);
     }
   };
 
@@ -176,7 +212,7 @@ export default function Question3Page({ activeTab, setActiveTab, scanType, onSub
         <button 
           type="submit" 
           className="frame board-2cb1e91ee621" 
-          disabled={!!error || !url.trim()}
+          disabled={!!error || !url.trim() || isValidating}
         >
           {/* text: SUBMIT */}
           <div className="shape text s-u-b-m-i-t-2cb1e91ee622">
@@ -184,7 +220,9 @@ export default function Question3Page({ activeTab, setActiveTab, scanType, onSub
               <div className="root rich-text root-0">
                 <div className="paragraph-set root-0-paragraph-set-0">
                   <p className="paragraph root-0-paragraph-set-0-paragraph-0" dir="ltr">
-                    <span className="text-node root-0-paragraph-set-0-paragraph-0-text-0">SUBMIT</span>
+                    <span className="text-node root-0-paragraph-set-0-paragraph-0-text-0">
+                      {isValidating ? 'VERIFYING...' : 'SUBMIT'}
+                    </span>
                   </p>
                 </div>
               </div>

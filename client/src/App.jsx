@@ -18,6 +18,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('HOME');
   const [scanStarted, setScanStarted] = useState(false);
   const [step, setStep] = useState(1);
+  const [latestScanIndex, setLatestScanIndex] = useState(null);
 
   useEffect(() => {
     console.log('App State Log - activeTab:', activeTab, 'scanStarted:', scanStarted, 'step:', step);
@@ -28,7 +29,24 @@ function App() {
   const [techStack, setTechStack] = useState('');
   const [scanLevel, setScanLevel] = useState('');
   const [scanResults, setScanResults] = useState(null);
-  const [scanHistory, setScanHistory] = useState([]);
+  
+  const [scanHistory, setScanHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('scanHistory');
+      return saved ? JSON.parse(saved) : [];
+    } catch (error) {
+      console.error('Error loading scan history from localStorage:', error);
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('scanHistory', JSON.stringify(scanHistory));
+    } catch (error) {
+      console.error('Error saving scan history to localStorage:', error);
+    }
+  }, [scanHistory]);
 
   const handleLetsGo = () => {
     setScanStarted(true);
@@ -76,14 +94,21 @@ function App() {
     if (summary.critical > 0 || summary.high > 0) riskLevel = 'HIGH';
     else if (summary.medium > 0) riskLevel = 'MEDIUM';
 
+    setLatestScanIndex(scanHistory.length);
+
     setScanHistory(prev => [...prev, {
-      projectName: projectName || scanTarget,
+      projectName: projectName || 'N/A',
       vulnDetected: findingsCount,
       vulnSolved: 0,
-      scanLevel,
+      scanLevel: scanLevel || 'basic',
       riskLevel,
       findings: results?.findings || [],
       score: results?.score !== undefined ? results.score : 80,
+      securityScore: results?.securityScore !== undefined ? results.securityScore : 80,
+      qualityScore: results?.qualityScore !== undefined ? results.qualityScore : 85,
+      performanceScore: results?.performanceScore !== undefined ? results.performanceScore : 90,
+      techStack: techStack || results?.techStack || 'N/A',
+      scanTarget: scanTarget || 'N/A',
       timestamp: Date.now(),
     }]);
 
@@ -208,6 +233,8 @@ function App() {
         activeTab={activeTab}
         setActiveTab={handleTabChange}
         scanHistory={scanHistory}
+        defaultReportIndex={latestScanIndex}
+        onClearDefault={() => setLatestScanIndex(null)}
       />
     );
   } else if (activeTab === 'SOLUTION') {
@@ -216,6 +243,8 @@ function App() {
         activeTab={activeTab}
         setActiveTab={handleTabChange}
         scanHistory={scanHistory}
+        defaultProjectIndex={latestScanIndex}
+        onClearDefault={() => setLatestScanIndex(null)}
       />
     );
   } else if (activeTab === 'ABOUT US') {

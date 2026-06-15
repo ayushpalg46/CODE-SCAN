@@ -3137,6 +3137,8 @@ html, body, #root {
 .remediation-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
   gap: 8px;
 }
 
@@ -3266,4 +3268,356 @@ html, body, #root {
   }
 }
 
+/* ==========================================================================
+   Visual PDF Template & Report Viewer
+   ========================================================================== */
+
+.pdf-viewer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(10, 10, 10, 0.9);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  z-index: 10000;
+  overflow-y: auto;
+  padding: 0 0 50px 0;
+  backdrop-filter: blur(8px);
+}
+
+.pdf-viewer-toolbar {
+  position: sticky;
+  top: 0;
+  width: 100%;
+  background-color: rgba(20, 20, 20, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 15px 40px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 15px;
+  box-sizing: border-box;
+  z-index: 10001;
+  backdrop-filter: blur(5px);
+  margin-bottom: 30px;
+}
+
+.pdf-toolbar-btn {
+  padding: 10px 20px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pdf-toolbar-btn-download {
+  background-color: #ff0000;
+  border: 1px solid #ff0000;
+  color: #ffffff;
+  box-shadow: 0 0 15px rgba(255, 0, 0, 0.3);
+}
+
+.pdf-toolbar-btn-download:hover {
+  background-color: #cc0000;
+  border-color: #cc0000;
+  transform: translateY(-2px);
+}
+
+.pdf-toolbar-btn-close {
+  background-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+}
+
+.pdf-toolbar-btn-close:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+.pdf-preview-scroll-container {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 0 20px;
+  box-sizing: border-box;
+}
+
+/* Exact visual reproduction of the user PDF template */
+.pdf-template-wrapper {
+  width: 794px;
+  height: 1123px;
+  background-color: #ffffff !important;
+  color: #000000 !important;
+  padding: 40px 35px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-family: 'Bitcount Prop Single', monospace !important;
+  box-shadow: 0 10px 35px rgba(0, 0, 0, 0.8);
+  position: relative;
+  text-align: left;
+}
+
+.pdf-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 5px;
+  background: transparent !important;
+}
+
+.pdf-logo {
+  font-family: 'Gugi', sans-serif !important;
+  font-size: 2rem;
+  font-weight: 900;
+  color: #000000 !important;
+  letter-spacing: -0.5px;
+}
+
+.pdf-title {
+  font-family: 'Gugi', sans-serif !important;
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: #000000 !important;
+}
+
+.pdf-thick-divider {
+  border-bottom: 8px solid #000000 !important;
+  width: 100%;
+  margin-bottom: 15px;
+}
+
+.pdf-box {
+  border: 5px solid #000000 !important;
+  background: #ffffff !important;
+  padding: 12px 18px;
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+
+.pdf-box-title {
+  font-size: 1.25rem;
+  font-weight: bold;
+  color: #000000 !important;
+  margin-bottom: 8px;
+  text-transform: none;
+}
+
+.pdf-box-content {
+  font-size: 0.95rem;
+  color: #000000 !important;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pdf-box-content p {
+  margin: 0;
+  padding: 0;
+}
+
+.pdf-label {
+  font-weight: normal;
+  color: #000000 !important;
+}
+
+.pdf-value {
+  font-weight: normal;
+  color: #000000 !important;
+}
+
+.pdf-vuln-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pdf-vuln-item {
+  font-size: 0.95rem;
+  color: #000000 !important;
+}
+
+.pdf-score-box {
+  border: 5px solid #000000 !important;
+  background: #ffffff !important;
+  padding: 12px;
+  text-align: center;
+  box-sizing: border-box;
+  margin-bottom: 15px;
+}
+
+.pdf-total-score-text {
+  font-size: 2.1rem;
+  font-weight: 900;
+  color: #000000 !important;
+  text-transform: none;
+  margin: 0;
+}
+
+.pdf-footer-section {
+  text-align: center;
+  margin-top: auto;
+}
+
+.pdf-footer-title {
+  font-size: 1.8rem;
+  font-weight: 800;
+  color: #000000 !important;
+  margin: 0 0 15px 0;
+}
+
+.pdf-footer-grid {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 25px;
+}
+
+.pdf-footer-col {
+  width: 30%;
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: #000000 !important;
+  line-height: 1.35;
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-footer-col.left-col {
+  text-align: left;
+}
+
+.pdf-footer-col.right-col {
+  text-align: right;
+}
+
+.pdf-footer-logo-box {
+  background-color: #dfdfdf !important;
+  color: #000000 !important;
+  font-family: 'Gugi', sans-serif !important;
+  font-size: 1.15rem;
+  font-weight: bold;
+  letter-spacing: 0.5px;
+  padding: 10px 15px;
+  border-radius: 0;
+  text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  box-sizing: border-box;
+  height: 45px;
+}
+
+/* Print simulation styling resets */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+}
+
+/* AI Solution Feature Styles */
+.ai-solution-btn {
+  background: linear-gradient(135deg, #a855f7 0%, #6366f1 100%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.4);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  font-family: 'Lexend Deca', sans-serif;
+  user-select: none;
+}
+
+.ai-solution-btn:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 0 25px rgba(168, 85, 247, 0.7);
+  background: linear-gradient(135deg, #c084fc 0%, #818cf8 100%);
+}
+
+.ai-solution-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.ai-solution-btn:disabled {
+  background: #333333;
+  color: #888888;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.ai-sparkle-icon {
+  font-size: 1rem;
+  animation: sparkle-pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes sparkle-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+.ai-loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  gap: 12px;
+  color: #a855f7;
+  font-family: 'Lexend Deca', sans-serif;
+  font-size: 0.95rem;
+  text-align: center;
+  width: 100%;
+}
+
+.ai-loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(168, 85, 247, 0.1);
+  border-top-color: #a855f7;
+  border-radius: 50%;
+  animation: ai-spin 1s infinite linear;
+}
+
+@keyframes ai-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Override remediation content font styling according to report requirements */
+.remediation-content {
+  font-size: 1.05rem;
+  color: #eee;
+  line-height: 1.5;
+  font-family: 'Bitcount Prop Single', monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 

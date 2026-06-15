@@ -9,7 +9,7 @@ def main():
     parser = argparse.ArgumentParser(description="Scanner Bridge CLI")
     parser.add_argument("--type", required=True, choices=["url", "github"])
     parser.add_argument("--target", required=True)
-    parser.add_argument("--mode", required=True, choices=["basic", "medium", "advanced"])
+    parser.add_argument("--mode", required=True, choices=["basic", "modrate", "advanced"])
     args = parser.parse_args()
 
     # Dynamic import based on mode

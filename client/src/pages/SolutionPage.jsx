@@ -1,11 +1,23 @@
 import React, { useState } from 'react';
 import Navbar from '../components/Navbar';
 
-export default function SolutionPage({ activeTab, setActiveTab, scanHistory }) {
-  const [selectedProjectIndex, setSelectedProjectIndex] = useState(null);
+export default function SolutionPage({ activeTab, setActiveTab, scanHistory, defaultProjectIndex, onClearDefault }) {
+  const [selectedProjectIndex, setSelectedProjectIndex] = useState(() => {
+    if (defaultProjectIndex !== null && defaultProjectIndex !== undefined && scanHistory && scanHistory[defaultProjectIndex]) {
+      return defaultProjectIndex;
+    }
+    return null;
+  });
+  const [aiSolutions, setAiSolutions] = useState({}); // Key: finding index, Value: solution markdown
+  const [loadingSolutions, setLoadingSolutions] = useState({}); // Key: finding index, Value: loading state
 
   const handleBack = () => {
     setSelectedProjectIndex(null);
+    setAiSolutions({});
+    setLoadingSolutions({});
+    if (onClearDefault) {
+      onClearDefault();
+    }
   };
 
   const getSeverityColor = (severity) => {
@@ -18,6 +30,41 @@ export default function SolutionPage({ activeTab, setActiveTab, scanHistory }) {
       case 'low':
       default:
         return '#44ff44';
+    }
+  };
+
+  const fetchAiSolution = async (finding, index) => {
+    if (loadingSolutions[index]) return;
+    setLoadingSolutions(prev => ({ ...prev, [index]: true }));
+
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.MODE === 'production' ? window.location.origin : 'http://localhost:5000');
+      const response = await fetch(`${apiBase}/api/scan/ai-solution`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: finding.title,
+          description: finding.description,
+          file: finding.file
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to consult Gemini AI');
+      }
+
+      const data = await response.json();
+      setAiSolutions(prev => ({ ...prev, [index]: data.solution }));
+    } catch (error) {
+      console.error(error);
+      setAiSolutions(prev => ({ 
+        ...prev, 
+        [index]: 'Error: Failed to consult Gemini AI. Ensure backend server is running and online.' 
+      }));
+    } finally {
+      setLoadingSolutions(prev => ({ ...prev, [index]: false }));
     }
   };
 
@@ -166,12 +213,24 @@ export default function SolutionPage({ activeTab, setActiveTab, scanHistory }) {
                         <div className="shape text solution-2ce40157755e">
                           Solution:
                         </div>
-                        <span className="ai-generated-badge">
-                          <span className="ai-sparkle-icon">✨</span> AI Generated
-                        </span>
+                        <button
+                          className={`ai-solution-btn ${loadingSolutions[idx] ? 'loading' : ''}`}
+                          onClick={() => fetchAiSolution(finding, idx)}
+                          disabled={loadingSolutions[idx]}
+                        >
+                          <span className="ai-sparkle-icon">✨</span>
+                          {loadingSolutions[idx] ? 'Consulting Gemini...' : (aiSolutions[idx] ? 'Regenerate Solution' : 'Ask Gemini AI')}
+                        </button>
                       </div>
                       <div className="remediation-content">
-                        {finding.remediation || 'Upgrade dependency or configure response headers properly.'}
+                        {loadingSolutions[idx] ? (
+                          <div className="ai-loading-container">
+                            <div className="ai-loading-spinner" />
+                            <span>Gemini is generating secure code solutions...</span>
+                          </div>
+                        ) : (
+                          aiSolutions[idx] || finding.remediation || 'Upgrade dependency or configure response headers properly.'
+                        )}
                       </div>
                     </div>
                   </div>
